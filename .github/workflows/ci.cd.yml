@@ -1,9 +1,9 @@
-name: Deploy Node.js Backend to EC2
+name: Deploy Node.js Backend via VPN
 
 on:
   push:
     branches:
-      - main   
+      - main
 
 jobs:
   deploy:
@@ -18,12 +18,20 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Setup VPN
+        run: |
+          echo "${{ secrets.VPN_CONFIG }}" | base64 -d > vpn.ovpn
+          echo -e "${{ secrets.VPN_USER }}\n${{ secrets.VPN_PASSWORD }}" > vpn-auth.txt
+          sudo openvpn --config vpn.ovpn --auth-user-pass vpn-auth.txt --daemon
+          sleep 10  # wait for VPN to connect
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ secrets.EC2_HOST }}        
-          username: ${{ secrets.EC2_USER }}    
-          key: ${{ secrets.EC2_KEY }}          
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
           script: |
             cd /home/ubuntu/Demo_Back
             git fetch --all
