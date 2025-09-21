@@ -18,12 +18,20 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install OpenVPN
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openvpn
+
       - name: Setup VPN
         run: |
           echo "${{ secrets.VPN_CONFIG }}" | base64 -d > vpn.ovpn
           echo -e "${{ secrets.VPN_USER }}\n${{ secrets.VPN_PASSWORD }}" > vpn-auth.txt
+          chmod 600 vpn-auth.txt
           sudo openvpn --config vpn.ovpn --auth-user-pass vpn-auth.txt --daemon
-          sleep 10  # wait for VPN to connect
+          echo "Waiting for VPN..."
+          sleep 10
+          ip addr show tun0 || true
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v0.1.10
