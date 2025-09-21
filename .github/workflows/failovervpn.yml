@@ -1,0 +1,74 @@
+name: Deploy Node.js Backend via VPN
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install OpenVPN
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openvpn
+
+      - name: Setup Primary/Failover VPN
+        run: |
+          set -e  # exit if a command fails
+          
+          # Save primary VPN config
+          echo "${{ secrets.VPN_CONFIG }}" | base64 -d > vpn.ovpn
+          echo -e "${{ secrets.VPN_USER }}\n${{ secrets.VPN_PASSWORD }}" > vpn-auth.txt
+          chmod 600 vpn-auth.txt
+
+          # Try connecting primary VPN
+          echo "Connecting to primary VPN..."
+          if sudo openvpn --config vpn.ovpn --auth-user-pass vpn-auth.txt --daemon; then
+            echo "Primary VPN connected"
+          else
+            echo "Primary VPN failed, trying failover VPN..."
+            # Save failover VPN config
+            echo "${{ secrets.VPN_FAILOVER_CONFIG }}" | base64 -d > vpn_failover.ovpn
+            sudo openvpn --config vpn_failover.ovpn --auth-user-pass vpn-auth.txt --daemon
+          fi
+
+          echo "Waiting for VPN..."
+          sleep 10
+          ip addr show tun0 || true
+
+      - name: Verify VPN Connection
+        run: |
+          echo "Pinging VPN Gateway..."
+          ping -c 4 10.8.0.1 || true
+          echo "Checking EC2 Reachability..."
+          echo "${{ secrets.EC2_KEY }}" > ec2_key.pem
+          chmod 600 ec2_key.pem
+          ssh -o StrictHostKeyChecking=no -i ec2_key.pem \
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "echo 'VPN OK and EC2 reachable'"
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
+          script: |
+            cd /home/ubuntu/Demo_Back
+            git fetch --all
+            git reset --hard origin/main
+            npm install
+            pm2 restart Demobackend || pm2 start index.js --name Demobackend
+            pm2 save
+            sudo systemctl restart nginx
