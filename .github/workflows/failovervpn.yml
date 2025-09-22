@@ -18,36 +18,28 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup VPN with Failover (Office2 → Office1)
+      - name: Setup VPN with Failover
         run: |
-          set -e
-          # Save VPN auth
+          sudo apt-get update
+          sudo apt-get install -y openvpn
           echo -e "${{ secrets.VPN_USER }}\n${{ secrets.VPN_PASSWORD }}" > vpn-auth.txt
           chmod 600 vpn-auth.txt
-
-          # Try Primary VPN → Office2
           echo "${{ secrets.VPN_OFFICE2 }}" | base64 -d > vpn_primary.ovpn
           echo "Connecting to Office2 VPN..."
           sudo openvpn --config vpn_primary.ovpn --auth-user-pass vpn-auth.txt --daemon
-          sleep 10
+          sleep 10 
 
           if ip addr show tun0 >/dev/null 2>&1; then
-            echo "Office2 VPN connected"
-          else
-            echo "Office2 VPN failed, switching to Office1..."
-            sudo pkill openvpn || true
-
-            # Failover VPN → Office1
-            echo "${{ secrets.VPN_OFFICE1 }}" | base64 -d > vpn_failover.ovpn
-            sudo openvpn --config vpn_failover.ovpn --auth-user-pass vpn-auth.txt --daemon
-            sleep 10
-
-            ip addr show tun0 >/dev/null 2>&1 || { echo "Failover Office1 VPN also failed"; exit 1; }
-            echo "Office1 VPN connected"
+          echo "Office2 VPN connected"
+          else  
+          echo "Office2 VPN failed, switching to Office1..."
+          sudo pkill openvpn || true
+          echo "${{ secrets.VPN_OFFICE1 }}" | base64 -d > vpn_failover.ovpn
+          sudo openvpn --config vpn_failover.ovpn --auth-user-pass vpn-auth.txt --daemon
+          sleep 10
+          ip addr show tun0 >/dev/null 2>&1 || { echo "Failover Office1 VPN also failed"; exit 1; }
+          echo "Office1 VPN connected"
           fi
-
-          # Optional: Verify VPN can reach server
-          ping -c 4 10.8.0.1 || { echo "VPN Gateway unreachable"; exit 1; }
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v0.1.10
